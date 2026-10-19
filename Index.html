@@ -1,1 +1,188 @@
-index.html
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fresh Trader</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080b12;color:#eef2ff;font-family:Arial,sans-serif}
+header{padding:18px;background:#101622;border-bottom:1px solid #263144}
+h1{font-size:23px;margin:0}
+h1 span{color:#38e6a5}
+small{color:#94a3b8}
+main{padding:14px;max-width:700px;margin:auto}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.card{background:#111927;border:1px solid #263348;border-radius:13px;padding:14px;margin-bottom:12px}
+.stat{font-size:23px;font-weight:bold;margin-top:8px}
+input,select,button{font-size:15px;border-radius:9px;padding:12px;border:1px solid #34435a}
+input,select{background:#0b1220;color:white;width:100%;margin:6px 0 12px}
+button{background:#38e6a5;color:#07120e;font-weight:bold;cursor:pointer}
+button:disabled{opacity:.5}
+.topbutton{width:100%;margin-top:12px}
+.tokenhead{display:flex;justify-content:space-between;gap:8px}
+.tokenname{font-weight:bold;font-size:17px}
+.green{color:#38e6a5}.red{color:#ff6b7a}
+.pill{font-size:11px;padding:5px 7px;border-radius:6px;background:#253144}
+.actions{display:flex;gap:8px;margin-top:12px}
+.actions a{flex:1;text-align:center;text-decoration:none;padding:10px;border-radius:8px;background:#1d3040;color:#64e6bc;font-weight:bold}
+.muted{color:#94a3b8;font-size:12px;overflow-wrap:anywhere}
+#status{margin:12px 0;color:#facc15;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+<h1>🚀 Fresh <span>Trader</span></h1>
+<small>Solana • Fresh token scanner</small>
+<button class="topbutton" id="wallet">Connect Phantom Wallet</button>
+<div id="walletStatus" class="muted" style="margin-top:8px">Wallet not connected</div>
+</header>
+
+<main>
+<div class="stats">
+<div class="card"><small>Tokens loaded</small><div class="stat" id="count">0</div></div>
+<div class="card"><small>High risk tokens</small><div class="stat red" id="high">—</div></div>
+</div>
+
+<div class="card">
+<label for="search">Search token / contract address</label>
+<input id="search" placeholder="Search name or address">
+<label for="filter">Filter</label>
+<select id="filter">
+<option value="all">All tokens</option>
+<option value="lower">Lower risk score</option>
+<option value="high">High momentum (60+)</option>
+</select>
+<button id="refresh" style="width:100%">↻ Refresh tokens</button>
+<div id="status">Loading Solana token data…</div>
+</div>
+
+<div id="tokens"></div>
+
+<div class="card">
+<strong>⚠️ Risk reminder</strong>
+<p class="muted">New meme tokens can lose most or all of their value. Scores are rough screening estimates, not predictions or guarantees. Verify liquidity and contract details before trading.</p>
+</div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+let tokens=[],walletPublicKey=null;
+
+function num(n){
+ return Number(n||0).toLocaleString("en-US",
+ {maximumFractionDigits:4});
+}
+function riskScore(t){
+ const liq=Number(t.liquidity?.usd||0);
+ const vol=Number(t.volume?.h24||0);
+ const cap=Number(t.marketCap||t.fdv||0);
+ let s=45;
+ if(liq<1000)s+=35;
+ else if(liq<5000)s+=20;
+ else if(liq<20000)s+=8;
+ if(!cap||!liq)s+=15;
+ if(liq&&vol/liq>10)s+=15;
+ if(liq&&cap&&liq/cap<0.02)s+=10;
+ return Math.max(0,Math.min(100,s));
+}
+function momentum(t){
+ const c=Number(t.priceChange?.h1||0);
+ const vol=Number(t.volume?.h24||0);
+ const liq=Number(t.liquidity?.usd||0);
+ return Math.max(0,Math.min(100,
+ Math.round(40+c*.6+(liq>0?Math.min(20,vol/liq*2):0))));
+}
+function riskLabel(s){
+ return s>=80?"EXTREME":s>=60?"HIGH":s>=35?"MEDIUM":"LOW";
+}
+function escapeHTML(s){
+ return String(s??"").replace(/[&<>"']/g,c=>({
+ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+ }[c]));
+}
+function render(){
+ const q=$("search").value.toLowerCase();
+ const f=$("filter").value;
+ let list=tokens.filter(t=>
+ (String(t.baseToken?.name||"")+" "+String(t.baseToken?.symbol||"")+" "+String(t.baseToken?.address||"")).toLowerCase().includes(q)
+ );
+ if(f==="lower")list=list.filter(t=>riskScore(t)<50);
+ if(f==="high")list=list.filter(t=>momentum(t)>=60);
+ $("count").textContent=tokens.length;
+ $("high").textContent=tokens.filter(t=>riskScore(t)>=60).length;
+ $("tokens").innerHTML=list.slice(0,60).map(t=>{
+ const r=riskScore(t),m=momentum(t);
+ const address=String(t.baseToken?.address||"");
+ const name=escapeHTML(t.baseToken?.name||"Unknown");
+ const sym=escapeHTML(t.baseToken?.symbol||"TOKEN");
+ const change=Number(t.priceChange?.h1||0);
+ const age=t.pairCreatedAt?
+ Math.max(0,Math.floor((Date.now()-t.pairCreatedAt)/3600000))+"h":"N/A";
+ const trade="https://pump.fun/coin/"+encodeURIComponent(address);
+ return `<div class="card">
+ <div class="tokenhead"><div><div class="tokenname">${name} (${sym})</div>
+ <small>${age} old • ${escapeHTML(t.dexId||"Solana DEX")}</small></div>
+ <span class="pill">${riskLabel(r)}</span></div>
+ <div class="stats" style="margin-top:14px">
+ <div><small>Price (USD)</small><div>${num(t.priceUsd)}</div></div>
+ <div><small>1h change</small><div class="${change>=0?"green":"red"}">${change.toFixed(2)}%</div></div>
+ <div><small>Liquidity</small><div>$${num(t.liquidity?.usd)}</div></div>
+ <div><small>24h volume</small><div>$${num(t.volume?.h24)}</div></div>
+ <div><small>Momentum</small><div>${m}/100</div></div>
+ <div><small>Risk score</small><div>${r}/100</div></div>
+ </div>
+ <p class="muted">Market cap: $${num(t.marketCap||t.fdv)} • ${escapeHTML(address.slice(0,6))}…${escapeHTML(address.slice(-5))}</p>
+ <div class="actions">
+ <a href="${trade}" target="_blank" rel="noopener noreferrer">Open Pump.fun ↗</a>
+ <a href="https://dexscreener.com/solana/${encodeURIComponent(address)}" target="_blank" rel="noopener noreferrer">Chart ↗</a>
+ </div></div>`;
+ }).join("")||"<div class='card'>No matching tokens. Refresh to retry.</div>";
+}
+async function load(){
+ $("status").textContent="Fetching latest token pairs…";
+ $("refresh").disabled=true;
+ try{
+ const res=await fetch("https://api.dexscreener.com/token-profiles/latest/v1");
+ if(!res.ok)throw Error("API returned "+res.status);
+ const profiles=await res.json();
+ const sol=profiles.filter(p=>p.chainId==="solana").slice(0,30);
+ const addresses=[...new Set(sol.map(p=>p.tokenAddress).filter(Boolean))];
+ let pairs=[];
+ for(let i=0;i<addresses.length;i+=25){
+ const r=await fetch("https://api.dexscreener.com/tokens/v1/solana/"+addresses.slice(i,i+25).join(","));
+ if(r.ok)pairs.push(...await r.json());
+ }
+ tokens=pairs.filter(p=>p.baseToken?.address);
+ tokens.sort((a,b)=>(b.pairCreatedAt||0)-(a.pairCreatedAt||0));
+ $("status").textContent=tokens.length?
+ "Live data loaded. Check token liquidity and risk before trading.":
+ "No token pairs found. Try refresh later.";
+ render();
+ }catch(e){
+ $("status").textContent="Could not load live data. Check internet and retry. "+e.message;
+ }finally{$("refresh").disabled=false;}
+}
+$("refresh").addEventListener("click",load);
+$("search").addEventListener("input",render);
+$("filter").addEventListener("change",render);
+
+$("wallet").addEventListener("click",async()=>{
+ try{
+ if(!window.phantom?.solana?.isPhantom){
+ $("walletStatus").textContent="Install/open Phantom browser, then open this app there.";
+ window.open("https://phantom.app/","_blank");
+ return;
+ }
+ const result=await window.phantom.solana.connect();
+ walletPublicKey=result.publicKey.toString();
+ $("walletStatus").textContent="Connected: "+walletPublicKey.slice(0,6)+"…"+walletPublicKey.slice(-5);
+ $("wallet").textContent="Wallet connected";
+ }catch(e){$("walletStatus").textContent="Connection cancelled or failed.";}
+});
+load();
+</script>
+</body>
+</html>
+
